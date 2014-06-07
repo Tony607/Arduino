@@ -1,0 +1,805 @@
+
+AR drone control with RC transmitter, a Wifi-less mod
+=====================================================
+
+Features
+  o precise control of drone
+  o cheap off the shelf hardware (Arduino Mini, AR6100)
+  o started with drone firmware versions
+    1.4.6, 1.4.7, 1.5.1, 1.6.6, 1.7.4 and 1.7.6
+    sorry, these versions are not supported any more since I can NOT test them.
+  o tested with drone firmware versions
+    1.7.11, 1.11.5 and 2.1.18, 2.1.20, 2.2.9, 2.3.3, 2.4.1
+  o true PNP, disconnect HW and drone is pristine...
+    + no BEC needed
+    + uses drone's serial port
+    + no surgery of system files on drone
+    + no need to make custom kernel for drone
+  o iDev can still be used for video
+    + mod allows iDev access to video port
+    + mod allows iDev access to NAVDATA port
+    + mod edits  iDev AT commands when in use
+  o Serial interface for GPS receiver (rev 0.04+)
+  o Selectable configurations (rev 0.07+)
+  o visible low battery alert (rev 0.08+)
+  o accomodates Mode 1, 2, 3 and 4 transmitters (rev 0.08+)
+  o source available in this package
+
+Hardware
+
+  1) Drone (mine are on firmware 1.7.11, 1.11.5 and 2.4.1 right now)
+  2) 5 or more channel RC transmitter/receiver
+     4 channels for sticks, 1 or 2 for flight mode switch
+     I use AR6100 or ORANGERX
+  2) Arduino ProMini or Nano 16Mhz/5V
+     If you are using a ProMini, make sure you have a FTDI board to program it.
+  3) Logic Level Converter (LLC) for drone serial port
+  4) Connector for drone serial port
+  4) Some headers and wires
+
+  Check www.mirumod.tk for resources.
+
+Software
+
+  The implementation uses a pair of programs, one running on the Arduino, the
+  other running on the drone. The basic drone program is attached to the sketch
+  as a binary and can be transferred to the drone by the Arduino program. The
+  drone program can also be preloaded on the drone, this way it does not have
+  to be in the FLASH of the Arduino.
+
+  The Arduino 'sketch' is compiled with the Arduino IDE.
+  I use Arduino IDE 1.0.2 to compile and download it to the Arduino board.
+
+rx2atp - receiver signal sampling and conversion
+
+  Installation on Arduino
+
+  'rx2atp' is the program for the Arduino. It does not make use of any
+  Arduino environment library functions, except the startup file and the
+  standard compiler support library, I hope they have not tinkered with...
+  Be careful using any of the libraries that come with the Arduino IDE,
+  they are generally not suited for this application.
+
+  Start the Arduino IDE, it comes up with an empty 'sketch', and select
+  <Sketch><Add File...>. Add the file 'rx2atp.c' from this package and
+  when you are done configuring 'Upload' it to the board.
+
+  Check the SETUP section of this file to set the macros for S_LAND, S_FMOD
+  and T_MODE and you want to take a look at the four drone configurations at
+  the begin of the file. There are 4 different sets. You can select which
+  one to use while the program is running. You choice is stored in the EEROM.
+
+  cfg1[] is the default, it has been used since the beginning of the mod
+  cfg2[] has everything maxed out
+  cfg3[] is for indoors, believe it is the default indoor config
+  cfg4[] is for indoors, tuned down even more
+
+  ! Before you go off flying you should check that 'rx2atp' interprets your
+  ! receiver signals correctly. Check the section SETUP below on how to do it.
+
+at2soXXX.arm or pilotXXX.arm - companion program
+
+  XXX in the names of companion programs stands for the revision of the mod, for
+  rev 0.20 it would be 'at2so020.arm' or 'pilot020.arm'.
+
+  One of these programs needs to be running on the drone for the mod to work.
+  It is the vehicle by which commands are passed from the Arduino to the drone
+  firmware. The companion program accepts commands from it's standard input,
+  translates them and sends messages to a socket that is serviced by the drone
+  firmware. In return it receives messages from the drone firmware and sends
+  information needed by the Arduino program back to the Arduino.
+
+  The companion program is launched by the 'sketch' of the Arduino. The 'sketch'
+  will search the drone file system for a companion program and if it can't find
+  any, will check as a last resort for presence of one in it's FLASH.
+  The program found is copied into '/tmp' on the drone and started by 'rx2atp'.
+  The search order is:
+  	1) /data/video/usb/pilotXXX.arm
+  	2) /data/video/usb/at2soXXX.arm
+  	3) /data/video/pilotXXX.arm
+  	4) /data/video/at2soXXX.arm
+  	5) FLASH attachment (at2so)
+  First found wins. Since the companion program is copied into '/tmp' on the drone
+  it does not survive a reboot of the drone.
+
+  Modifications to a companion program are not for the faint of heart. You need
+  a toolchain for the ARM processor that can generate programs for the Linux
+  on the drone. At this point I use:
+       arm-2010.09-50-arm-none-linux-gnueabi-i686-pc-linux-gnu.tar.tar
+  on a Linux box.
+
+  'at2so' is the minimum companion program. I publish it's source (at2so.c) with
+  this package as well as a binary at2soXXX.arm, which is also contained as a binary
+  attachment in the sketch 'rx2atp.c'. If you are adding things to rx2atp, you will
+  be running out of FLASH space really quick. The solution to this problem is to
+  transfer at2soXXX.arm to the drone with ftp and to reset the value of the macro
+  in the first line of rx2atp.c to 0. Setting the macro AT2SO to 0 will prevent the
+  insertion of the companion program into the FLASH and give you a whole lot of space.
+  Of course, the whole thing will not work if you don't have a companion program on
+  the drone... so make sure you have transferred it to a location where it can be
+  found by the search routine (see above).
+
+  'pilot' is the more sophisticated companion program. I don't publish it's source
+  (pilot.c) because it is very experimental, don't want to be tied down nor get into
+  implementation discussions. The pilot program has an 'auto pilot' function, which
+  is engaged when you go into FM3. At this point (rev 0.20) the 'auto pilot's task
+  is to steer the drone back to the HOME position. The home position is set by a
+  FTRIM. When the HOME position is set, the 'normal' FTRIM GREEN blink of the motor
+  LEDs is replaced with a GREEN/RED blink to acknowledge the HOME set. When you see
+  the GREEN/RED blink response to a FTRIM, you know that the pilot program is
+  running AND that the GPS has a decent lock. You can also tell the GPS status when
+  you move the rudder stick down in LAND. If the pilot program is not running or the
+  GPS data is not making it to the pilot program the Arduino LED will go off.
+  If the LED blinks, 1 blink is for GPS data presence, 2 blinks is for GPS data with
+  a 2D lock, at least 4 satellites and an HDOP of less than 4, 3 blinks indicate a
+  3D lock of the GPS.
+
+  Companion program logs
+
+  Log records of companion programs have the following format:
+
+	  <time in ms since start>: <key>[,<value>[,<value ... ]]
+
+  The 'sketch' rx2atp can make log entries, the current records are:
+  	GPSR,<stat>,<char>	gps_rcv() error signaling
+	RX,1			RX ready
+	RX,0			RX failure
+
+  The companion programs will pass any GPS message from the Arduino into the log:
+  	$GPGGA,.....
+  	$GPRMC,.....
+  	$GNRMC,.....
+
+  'at2so' and 'pilot' will produce quite a few log messages, here are the common keys:
+  	- all these reflect changes in the drone's NavData status register:
+  	ESTP,<val>
+  	CMAK,<val>
+  	WDOG,<val>
+  	MOTO,<val>
+  	AOOR,<val>
+  	COUT,<val>
+  	ALTC,<val>
+  	USND,<val>
+  	WIND,<val>
+  	BLOW,<val>
+  	STRT,<val>
+  	AIRB,<val>
+  	DCST,<hex change mask>,<hex drone status>
+
+	BOOT,<version>,<lid>              - program start
+	EXIT,<version>                    - program exit
+	DFMW,...                          - drone firmware version
+	LOOP,<val>                        - program loop entry/exit
+	LINK,<val>                        - hardware link to sketch status
+	VBAT,<percentage>                 - battery left
+	HPSI,<deg>                        - heading
+	ALTI,<altitude in mm>             - altitude
+	C_SC                              - start character sent to sketch
+	W_SC                              - start character sent to sketch (watchdog)
+	DCFG,<name>,<value>               - configuration command sent
+	TRIM                              - flat trimm
+	FMOD,<val>                        - flight mode (0,1,2,3,E)
+	IDEV,<val>                        - IDEV status
+	NRQI,<# of bytes rcvd>,<value>    - external NavData request
+	DATI,<fill>,<nrcv>                - data transfer drone -> iDev
+	DATI,EOF,<type>                   - data transfer drone -> iDev
+	DATI,SND,<size>                   - data transfer drone -> iDev
+	PCMD=,....                        - steering commands drone 1
+	PCMD_MAG=,....                    - steering commands drone 2
+
+  'pilot' generates more messages:
+  	MPWR,<val>                              - power setting
+  	HOME,<lat>,<lon>                        - home set
+  	LNPT,<gps>,<lat>,<lon>,<slat>,<slon>    - launch point
+  	TDPT,<gps>,<lat>,<lon>                  - touch down point
+  	STGT,<lat>,<lon>,<x>,<y>                - pilot destination point
+  	ICMD,...                                - command received from IDEV (PCMD, REF are silently dropped)
+  	TTFF,<sec>                              - GPS time to first fix
+  	There are more messages which pertain to the auto pilot observation, in
+  	general the keys start with 'P'.
+
+SETUP
+=====
+The mod 'sketch' uses 5 or 6 of the available receiver channels.
+Four channels are for the sticks. The others are used as flight mode switches.
+
+There are some choices you need to make before uploading the 'sketch' into
+the Arduino:
+
+1) Tell the program which channels you want to use as the flight mode switch.
+   Channel S_AUX1 is interpreted as a 3 position switch, S_GEAR is a 2 position
+   switch. Set each of the macros S_LAND and S_FMOD to either S_GEAR or S_AUX1.
+
+   S_LAND is interpreted as LAND/FLY choice.
+   S_FMOD is the flying mode once you are in the air. At this point there are two
+   modes FM1 and FM2, which differ in respect to the drones position hold mode when
+   you let go of the AILE/ELEV stick. In FM1 the drone is told to counteract any
+   horizontal movement in hover (it uses it's down looking camera for this). This
+   is the 'beginner' mode, you let go of the stick when you get into trouble and
+   it will try to stop horizontal movement on the dime. In FM2, the 'advanced'
+   mode, the camera is not engaged, it will 'float' into hover and you have to
+   counteract horizontal movement if needed.
+
+2) Tell the program your transmitter mode.
+   Set the macro T_MODE to 1, 2, 3 or 4.
+
+   T_MODE 1 or 4 is interpreted as throttle/aileron on the same stick.
+   T_MODE 2 or 3 is interpreted as throttle/rudder on the same stick.
+
+3) Check/modify the VLBA_THR MACRO, a value of 1 ... 60 will trigger the mechanism.
+   It will flash the drone's lights in red and activate an output on the Arduino.
+   Note: The drone raises VBAT_LOW flag if the percentage reaches 10% and will
+   do an EMERGENCY LAND if it reaches 0. This feature gives you a visible notice
+   if it is time to land. Rev 0.09 uses pin labelled (9) on Arduino Pro as an output
+   (blinking 5HZ, 40/60 duty cycle or steady state). The MACRO VLBA_POL allows to set
+   the active state (default is 1 (high)). The MACRO VLBA_BLINK allows to select a
+   pulsing or steady state signal.
+
+
+If the flight mode is LAND the throttle/rudder stick functions as a push button. Moving
+it left issues FTRIM to the drone, moving it right issues an EMERGENCY to the drone.
+
+When you have all the hardware together and downloaded the 'sketch' into the
+Arduino, run a check to make sure 'rx2at' interprets the signals right.
+
+Ground the pin labelled (11), connect a serial converter (5V signals!) to the Arduino
+(most likely you downloaded the 'sketch' with it) and power it up.
+You can NOT use the Arduino IDE Serial Monitor for this because it can NOT
+send a single control character by itself...  Use Hyperterminal or something
+else, set it up for 115200, 8 bits, 1 stop, no parity, no handshake.
+
+Then type Ctrl-B (Control AND B), this is the 'magic' start character for
+'rx2atp'. It will show you something along the lines....
+
+	rx2at revision..., at2so attached
+	cpusg XXXXXX fuses XX-XX-XX-XX
+	 loop 33.3ms, dcnt=2663
+	  gps ...
+
+	-RX-  f[ms]  p[ms] value
+	AILE   21.9  1.500     0
+	ELEV   21.9  1.500     0
+	THRO   21.9  1.500     0 CFGx
+	RUDD   21.9  1.500     0
+	AUX1   21.9  1.900  1000 LAND
+	GEAR   21.9  1.100 -1000
+
+'rx2atp' measures the frametime (pulse to pulse) and the pulse length in [ms].
+The value column is the interpreted value. If you move the sticks or flip the
+switches on your TX the numbers should reflect that. Set your TX up for an
+airplane, meaning NO heli mixing of the channels, you want every stick on
+a separate channel. In a mode 2 TX the THRO channel is the left stick moving up
+and down, the RUDD channel is your left stick moving left and right, the ELEV
+channel is your right stick moving up and down, the AILE channel is your right
+stick moving left and right.
+
+Make sure you got the sticks and switches going to the right channels, if not,
+fix the wiring or change the bit assignment in main(). Also make sure that
+each channel is only affected by a single actuator (switch or stick)!
+When all sticks are centered the value of RUDD, AILE, ELEV and RUDD should
+be 0. Check your trimms and subtrims if the readings are not 0.
+
+Once this works, the polarities need to be checked...
+THRO up     -> positive values	(PCMD GAZ value)
+RUDD right  -> positive values  (PCMD YAW value)
+ELEV down   -> positive values  (PCMD PTC value)
+AILE right  -> positive values  (PCMD ROL value)
+Invert the channels on your TX until it behaves the way above...
+
+The channel selected as LAND switch will show the current flight mode. Make sure
+it reflects the switch positions (LAND/FM_1[FM_2]) you intend to use. You might
+have to invert a channel to get it the way you want it. I use a DX7 with the
+following setting: S_LAND S_AUX1 and S_FMOD S_AUX1 which makes the 3 position DX7
+flight mode switch act as LAND/FM1/FM2. If your TX/RX does not provide a 3 position
+switch, but has 2 switches you can use one for LAND/FLY, the other for the flight
+mode.
+
+Once you got the sticks and the flight mode switch right, you need to make sure
+you know what is going to happen if your receiver looses contact with the TX.
+So, turn the TX off and check what the signals do. If at least one of the stick
+channels or the FMS channel shows up in red you are ok, because 'rx2atp' will
+land the drone if this happens. On my setup this did not work at first, because
+in this situation the AR6100 kept on sending what it received last except for
+the THRO channel, which will transmit the value the throttle stick had when it
+was bound to the transmitter. To fix this in my setup, I did rebind the AR6100
+with a very low throttle stick value (-150%), which fixed this (after putting
+the gain back to 100%).
+Then turn the transmitter back on and make sure everything comes back to normal.
+
+Once all this works, disconnect GND from pin (11) on the Arduino and hook it up
+to the drone. Power up TX, power up drone (standard practice) and wait...
+On my setup the following things happen:
+
+1) Drone turns on RED lights and boots
+2) Arduino LED blinks 1, 2, 3 or 4 times per second.
+   1 blink:  no/bad RX signals
+   2 blinks: flightmode not LAND
+   3 blinks: waiting for drone to boot
+   4 blinks: waiting for 'quiet' time on interface
+3) Drone turns off RED lights and turns on GREEN lights.
+4) Arduino turns on LED while it searches, copies and launches companion program.
+5) companion program makes the drone lights blink orange for a second once it starts.
+6) 'rx2atp' sends the configuration commands to companion program and turns off LED.
+   Once the companion program is done with the commands it flashes the lights green
+   on the drone for a second and tells 'rx2atp' to go ahead.
+7) Check your emergency stop set/reset, do a FTRIM before you launch and have fun.
+
+
+OPERATION
+=========
+
+To check EMERGENCY set/reset flip the flight mode switch to LAND and push the
+throttle stick to the right. The drone lights should go red when you do that.
+Do it again to reset the emergency.
+
+To FTRIM the drone, flip the flight mode switch to LAND and push the throttle
+stick to the left. The drone lights should blink when you do that.
+
+To launch, I put the throttle down, flip the flight mode switch to FM1 or FM2
+and raise the throttle stick. When it crosses center the drone launches. You
+can also put the throttle on center first, then flip the switch...
+
+To signal an EMERGENCY to the drone, flip the flight mode switch to LAND and
+move the throttle stick to the right. If you do that while it is airborne, it
+falls out of the sky, otherwise it sets/resets an EMERGENCY.
+
+Drone configuration changes:
+The drone needs to be in LAND. Push the throttle stick all the way up and
+leave the elevator stick centered, the Arduino LED indicates the current
+configuration with 1, 2, 3 or 4 blinks.
+
+To select a configuration, use the elevator stick:
+
+            N
+           cfg3
+            ^
+            |                 N - Normal   (indoor)
+W cfg2 <--- + ---> cfg4 E     E - Easy     (indoor, tame)
+            |                 S - Standard (what I use)
+            v                 W - Wild     (everything set to max)
+           cfg1
+            S
+
+The Arduino LED will indicate the selection. To make it 'stick' hold the elevator
+stick on your new selection and move the throttle stick down. This will store your
+choice in EEPROM on the Arduino and upload the new parameters to the drone. You'll
+see the drone blink the motor lights when the new configuration is received.
+
+
+CHANGES
+=======
+
+20130723 REV 0.22 started
+
+20130723 REV 0.21 done
+         o Pulled RX_CON macro to front and set default to 0
+         o AUX1 channel inversion controlled by macro IN_AUX, default set to 1 to match
+           previous versions.
+	 o Added new macro NL_AIR to turn off LED when airborne, default is 0
+20120720 REV 0.21 started
+
+20130720 REV 0.20 done
+	 There were too many changes to document here. A lot of changes were prompted
+	 by the desperate search for code space.
+	 Here are the highlights:
+         o Fixed rx_read() bug, FTTOT comparison needs to be done differently.
+         o Fixed bug, Drone 2 max height limit 100000 -> 1000000 (can't turn it off).
+         o Switching baudrate to 38400 before upload of companion program.
+         o Dropped NMEA user input in SETUP mode
+	 o Dropped hardcoded inversion of AUX1 channel, you have to do that in the TX now.
+	   !! Make sure you run SETUP and check your flight mode switches !!
+	 o Dropped FSAF input, all RX units used so far do or can be set up to do something,
+	   to their pulses that can be detected by the sampling routines if the connection
+	   to the TX is lost. Detection of this failure initiates an auto land.
+	 o Dropped VLBA morse code signaling.
+	 o Dropped SOS code signaling, on detection of alternate controller.
+         o GSWO enabled by default so GEAR channel always shows up in SETUP.
+         o Optional Arduino LED off when drone is airborne
+	 o New error code signaling for companion program start failures:
+	   1+1 blink:  shell not responding
+	   1+2 blinks: Problem with D=/data/video/usb command
+	   1+3 blinks: Problem checking for pilotXXX.arm program
+	   1+4 blinks: Problem checking for at2soXXX.arm program
+	   1+5 blinks: Problem with D=/data/video command
+	   1+6 blinks: Problem checking for pilotXXX.arm program
+	   1+7 blinks: Problem checking for at2soXXX.arm program
+	   1+8 blinks: Can't find a companion program to run
+	   1+9 blinks: Companion program detected other controller and terminated
+	   If the Arduino LED stays ON the sketch is waiting for the start character from
+	   the companion program. Failures 1..7 indicate something bad with the serial
+	   link between the Arduino and the drone.
+	 o Writing the pilot log to the USB stick on a drone 2 makes the drone very
+	   twitchy when video is recorded at the same time. at2so writes it's log to
+	   /tmp/at2so.log and pilot writes it to /data/video/P%d.txt, with %d replaced
+	   by the boot index of the Arduino modulo 5.
+	 o Turned out that feeding the firmware with AT*REF commands at 30Hz is not
+	   really necessary. Therefore the companion program now decides when to send
+	   these, making the 'sketch' on the Arduino less critical.
+	 o Some people get airborne hardware failures, like wire disconnects... Added
+	   a link check in companion program that detects if the Arduino got disconnected
+	   and lands the drone when this failure occurrs.
+	 o Added optional I2C port and optional drivers for BMP085 and HMC5883L.
+	   Note: at this point the data is not used for anything but is written to the log.
+	   You can use the data in the sketch or the companion program, ideas are altitude
+	   stabilisation and/or compass for drone 1.
+	 o Added RTH function in pilot for drone 2. You need a GPS connected to the mod.
+	   Beware that all GPS units I tested exhibit severe data jumps within the first
+	   couple of minutes of operation.
+	 o Added support for MiruPCB, a little board I designed with an Atmega32U4, a LLC
+	   and a drone connector.
+20120911 REV 0.20 started
+
+20120911 REV 0.19 done
+20120911p Decided pilot is not ready for prime time -> disabled
+20120823a Fixed issue with TX fault on unused channel
+20120728a New feature: in LAND, if you move the throttle stick all the way down, the
+          Arduino LED will show the GPS status:
+          0 blinks - pilot program not running or no GPS data
+          1 blink  - no GPS fix
+          2 blinks - GPS has 2D fix
+          3 blinks - GPS has 3D fix
+20120728d Redesigned data exchange between companion and pilot program to reduce the
+          amount of data transferred to a bare minimum. There are two packets, TAG 81
+          from pilot to companion and TAG 82 from companion to pilot.
+20120702a Changed EEROM magic number, added boot counter 'bid' to EEROM data structure.
+          'bid' gets incremented before launch of the companion program and saved in EEROM
+          if the companion program sends the start character.
+          FYI, the EEROM does not get erased when you load a new sketch. The 'bid' is passed
+          to the companion program as an argument (-l #). The companion program passes it to
+          the pilot program. The pilot program uses the number to generate the file name for
+          the log file. It is P%d.txt by default. The %d is replaced by the 'bid' modulo 20
+          on an external drive and 'bid' modulo 5 for storage on the drone in '/data/video'.
+          The size of a log file is limitied to 4 Mb.
+20120630p Auto pilot program writes a log file to permanent storage of an external drive or
+          the drone /data/video directory (drone 1 or no USB stick on drone 2). The log file
+          format is in ASCII, aka human readable.
+          Pawelsky helped me a lot and wrote a wondeful piece of software that can pick
+          up one of these log files and convert it to something Google Earth understands!
+          This way one can display a recap of a flight on GE with all the things that happen.
+          I hope he finds a way how to give everybody access to this very useful tool.
+20120622d Moved interpretation of GPS data from companion program to pilot program.
+          At this point there is no more GPS data insertion into the Navdata stream.
+20120621a To accommodate GPS units that can not store a setup for baudrate, frequency and
+          content of reports as well as users that don't want to deal with it, 'rx2atp'
+          attempts to setup the GPS 'automagically' with the parameters it wants. It will
+          auto-detect the baudrate (not a choice any more), send 'PMTK' instructions to
+          change the baudrate to 38400, the update rate to 200ms and ask for a GGA sentence
+          on every report and for a RMC sentence every 5th report (need it for the date).
+          All other sentences are turned off.
+20120620p Auto pilot program name changed from 'pilot.arm' to 'pilotXXX.arm'. XXX stands for
+          the revision of the mod. The name is hardcoded into the matching version of the
+          companion program 'at2so' so there can't be any accidental mixups by design. There
+          is also a key exchange between the companion program and the pilot to make sure
+          both come from the same revision of the mod.
+20120617a Set MERX on start, fixes bug in start blink sequence.
+20120617 REV 0.19 started
+
+20120617 REV 0.18 done
+20120617a  added auto baud rate detection for GPS 4800, 9600, 19200, 38400 and 57600
+20120611a  the Turnigy RX will shut down some of it's channels but not all of them to
+           signal a 'failsafe' condition, which was NOT discovered by the mod and led
+           to the implementation of a wire (D8) to check if RX LED was on or off to take
+           that as a 'failsafe' indicator. Now, the mod is checking for the age of the
+           last UP transition of a channel and faults the channel if it is too old.
+20120611a  dropped no signal change detect mechanism in rx_proc(). Failure will be
+           detected by transition age check.
+20120610d  GPS based auto pilot became separate program, gets launched by at2so
+           if present in /data/video/usb or /data/video. GPS data is processed by
+           auto pilot now -> no GPS data in Navdata stream unless pilot is running.
+           (Had to move it, costs too much code space on Arduino)
+20120601a  added D2 start/stop video recording on launch/land (no effect on D1)
+20120601ad video recording to USB stick is a config option (no effect on D1)
+20120519a  eliminated floating points to save code space
+20120511a  added NSQUIET 5 back in, NS_BOOT is 18 now
+20120501a  limit RX values to +-1000
+20120501a  inversion of AUX channel done differently, should ultimately be done in TX
+20120429a  gps_rcv() dropped unused variable 'n'
+20120428 REV 0.18 started
+
+20120428 REV 0.17 done
+20120428da added animation enable to configuration commands
+20120428da moved configuration command generation to drone,
+           sketch only sends argument list
+20120427da added changes for drone 2
+20120427da added animation mode triggers
+20120427da changed configuration argument values in cfgX[] TRUE->1, FALSE->0
+20120427da changed configuration altitude_max to [m] from [mm], 0 is off
+20120420a changed NS_BOOT from 10 to 21, Wifi setup takes quite some time... (Pawelsky feedback)
+20120417 REV 0.17 started
+
+20120417 REV 0.16 done
+20120417a  CONFIG general:navdata_demo TRUE, emits tags 0(148) AND 16(328), which
+           leads to a 500 byte packet... Unfortunately I have not found a way to
+           turn tag 16 off.
+20120417a  CONFIG general:navdata_options from FreeFlight 2.0 is passed on now, it
+           requests tags 0(148), 16(328), 20(12), 22(75), 25(32), 26(8), total package
+           size including header(16) and checksum tag(8) is 627!
+           at2so adds tag 80, it currently has 48 bytes...
+20120416a  changed boot delay to 10 seconds and dropped 'quiet' time requirement
+20120416a  uploading at 115200 now, baudrate switch to 38400 afterwards
+20120406d  added support for recording/capture function of FreeFlight 2.0
+20120406da iDev lockout based on throttle stick position on boot
+20120406da replaced companion program flags -itf with -w flag (Wifi block if present)
+20120405 REV 0.16 started
+
+20120405 REV 0.15 done
+20120405da added -i flag for at2so (settable in 'sketch'), it blocks command, navdata,
+           video and data port access from the outside
+20120405da CONFIG_IDS is working now, added edting routines to CTRL4/6 responses from
+           firmware so iDev is happy, thinks it's got it and shows video...
+20120329da added sendig RX signals while in LAND
+20120328 REV 0.15 started
+
+20120328 REV 0.14 done
+20120327a added dr_send() and dr_vlba() procedures to unclutter loop()
+20120327d locking out external packets to TCP 5559 and UDP 5556
+20120327d added detection of iDev presence on startup, if iDev is present mod will
+          bail out and signal SOS on Arduino LED. The code to make FreeFlight 1.9.3
+          and firmware 1.7.11 happy is too large to fit in the Arduino FLASH, the
+          only benefit would be that one could switch cameras from the iDev.
+20120324d on drone firmware 1.7.11 use CONFIG_IDS and enable p264 codec
+20120322a added gl.rxs.erx and MERX to delay immediate 'auto' land on RX failure
+20120118a cleaned up rx_read(), cli() is not needed anymore
+20120118a Pawelsky found 'leftover' in line 1519, fixed
+20120118d Pawelsky cleared up where the <session>,<profile>,<application> numbers come from
+          -> good to know, but no change in dropping policy
+20120117 REV 0.14 started
+
+20120117 REV 0.13 done
+20120117a elevator stick right in LAND sends a switch camera command to drone
+20120117d with drone firmware 1.7.11 and FreeFlight 1.9.3, Parrot changed the way
+          configurations are handled... which explains a lot of the troubles people
+          are having with the mod as soon as they start an iDev app.
+          There are some new commands used by FreeFlight for configuration commands:
+          AT*CONFIG=<seq>,"custom:session_id","<session>"
+          AT*CONFIG=<seq>,"custom:application_id","<application>"
+          AT*CONFIG=<seq>,"custom:profile_id","<profile>"
+          AT*CONFIG_IDS=<seq>,<session>,<profile>,<application>
+          <session>, <profile> and <application> are 8 digit hex numbers I have no
+          idea where they come from, arbitrary numbers don't work. The iDev seems to
+          know the numbers, but I don't.
+          The data is stored/retrieved to/from:
+		  /data/config.custom/applis/config.<application>.ini
+		  /data/config.custom/profile/config.<profile>.ini
+		  /data/config.custom/sessions/config.<session>.ini
+	  Once the drone is in that mode any CONFIG command not preceeded by the
+	  proper AT*CONFIG_IDS is ignored!
+	  After a lot of trials and errors I have decided to do the following:
+	  a) if the drone firmware is 1.7.11 or higher, the new scheme is used with
+	     session_id 00000001 profile_id 6FB0C592 and 0x5BA841E9
+	  b) the iDev, gets blocked out. I will honor requests to dump config data
+	     and/or session data and allow any CONFIG=<>,"video.. .
+20120115a added configuration setting in SETUP mode
+          WATCH IT! it WILL do the SAVE to EEPROM in SETUP if you pull down throttle
+          while the elevator stick is in a new configuration.
+20120115a implemented my proposed pin changes on ARDUINO since not too many people
+          complained or will be hurt by it.
+          BUT!!!! if you modify GSWO_ENA to >= 0 !!!!
+          	D10 will be an OUTPUT, so !!!! DON'T SHORT IT TO GROUND FOR SETUP !!!!
+          the new 'failsafe' input for checking RX loss of sinal is D8, it got moved from A3!
+20111228 REV 0.13 started
+
+20111228 REV 0.12 done
+20111222a added Arduino pin 12 as optional output to reflect gear switch status (GWSO_ENA)
+20111220a added recognition of 'dead' receiver (no signals)
+20111111a bugfix, rx_loop() did not mask rx_read() result with S_SIG -> no FTRIM, ESTOP in display.
+20111106 REV 0.12 started
+
+20111106 REV 0.11 done
+20111106 added morse code blinking capability to VLBA output (CANDU1 suggestion)
+	 for now it will send a 'R' on FTRIM and transition into FM3.
+20111105 Some TX/RX sets don't have a 'failsafe' function... Added by request optional
+         use of pin labelled A3 as FAILSAFE input. It can be connected to RX LED that
+         shows connection status.
+20110923 REV 0.11 started
+
+20110922 REV 0.10 finished
+20110922d changed tag 80 to contain # of satellites and HDOP
+          typedef struct {
+          	unsigned short	tag;
+          	unsigned short	siz;
+          	short	fix;	/* position fix indicator */
+          	short	nsa;	/* number of satellites used */
+          	double	tim;	/* UTC time in seconds from 00:00:00 */
+          	double	lat;	/* latitude  in degrees */
+          	double	lon;	/* longitude in degrees */
+          	double	hdp;	/* HDOP, horizontal dilution of precision */
+          	double	alt;	/* altitude in meters */
+          }	t80_t;
+20110922a added rx_proc(), processing of RX signal samples outside of ISR.
+          GPS 38400 and 57600 baud work now.
+20110921a Arduino D11 became additional pin for SETUP.
+          This makes the Nano wireing less painful and more elegant.
+20110916a GL= reports more fields from GGA sentence (added # of satellites and HDOP)
+          GL=<fix>,<nsa>,<tim>,<lat>,<lon>,<hdp>,<alt>
+20110910a implemented FM3, it is reached when you are in FM2 and shortly switch
+          to FM1 and back to FM2. It is cancelled by either switching to FM1 or
+          LAND or moving the aileron/elevator (elevator for Mode 1,4) channel out
+          of 0 position.
+20110905a added AT2SOARGS, arguments to 'at2so', this way the sketch controls
+          what is done to telnet and ftp on the drone...
+20110905d implemented argument processing
+           -t enables telnet on drone
+           -f allows ftp writes on drone
+20110830a changed start blip sequence
+          1 blip  -> radio not ready
+          2 blips -> radio ok, but FMODE not LAND
+          3 blips -> radio ok, LAND, waiting for drone to boot
+          4 blips -> radio ok, LAND, drone booted, waiting for silence on tty
+20110820d lock out telnet contacts and ftp write
+20110820a GPS 38400 baud problem, RX sample processing in IRQ takes too long
+20110820a GPS receiver buffer size, made it dependent on GPS_BAUD and LOOPHZ
+20110816a lower baudrate to drone only if initial 115200 requires double speed
+20110816 REV 0.10 started
+
+20110815 REV 0.09 finished
+20110815a added VLBA_BLINK for selection of blinking or steady state output
+20110815a VLBA has 3 macros now: VLBA_THR, VLBA_POL and VLBA_BLINK
+20110813a added VLBA implementation with toggling output when it is active
+20110813d removed VLBA implementation, is done on the Arduino now
+20110813a added sio_rcv() to receive data from drone, decided on binary structure
+          with hex coding on the wire, leading '$', trailing '*'. Current message
+          size is 1+5+1=7 bytes.
+20110813d sending drone status and cbat (tag 0) to Arduino every 0.5 seconds
+20110813d lowered serial baud rate between Arduino and drone to 38400. The 16 Mhz
+          Arduino clock can handle that baudrate in and out with an error of 0.2%.
+20110811 REV 0.09 started
+
+20110811 REV 0.08 finished
+20110809d added blinkig red motor LEDs when THR_VLBA triggers
+20110805a added THR_VLBA macro, added RX=B,% command to sent THR_VLBA to 'at2so'
+20110802a added T_MODE macro
+20110728 REV 0.08 started
+
+20110728 REV 0.07 done
+20110728a added configuration choices (4)
+20110725d circumnavigate pairing, turned off on start, is restored when drone gets rebooted
+20110528a dropped rx2atp.hex from distribution, is compiled on Linux and not on Arduino IDE
+	  there are conflicts with the bootloader...
+20110526a SETUP mode shows processor signature bytes, fuse bytes and lockbits
+20110523 REV 0.07 started
+
+20110523 REV 0.06 done
+20110522d can't turn off TAG 16 (120 bytes, all 0) -> deleting it on the fly
+20110522d dropped request for navdata TAGS 1,2,3 , they are useless for now
+20110522a dropped S_FMS, added S_LAND and S_FMOD based on input from rcgroups.com
+20110517d udp_soc(), bug, was returning errno instead of -1 on failure (not critical)
+20110514a dr_loop(), bug in configuration loop, S2 timeout should go to S0 not S1 (not critical)
+20110508 REV 0.06 started
+
+20110508 REV 0.05 done
+20110508* 'at2so' sends \001 to Arduino when configs are done
+20110508d 'at2so' does proper config dialog now AS_COMMAND_ACK
+20110508a reduced number of configs from rx2at()
+20110508a fixed arduino-022 gcc optimizer screwup on ms_dly()/msdly_cali()
+20110504d added insertion of GL= data into navdata (tag 0x0050)
+20110504d dropped rx_edit(), got replaced by gcmd()
+20110504d added parsing of GL=
+20110504a parsing NMEA GGA on Arduino now, 'at2so' gets GL=<utc>,<lat[deg]>,<lon[deg]>,<alt[m]>
+20110501a moved all static strings to flash, was running short on ram
+20110426a revisited UART receiver problems, works now, at least from PC
+20110425a upgraded stick resolution from +-100 to +-800 points (1600 on full stick)
+20110425a timer1 runs at /8 prescaler now, added overflow interrupt and tic() to read it
+20110422d added str2d()
+20110422d improved str2f(), is very limited! Not good enough for longitude/latitude...
+20110422 REV 0.05 started
+
+20110422 REV 0.04 done
+20110420d listens to navdata and sends COMWDG on AS_COM_WATCHDOG
+20110420d got more complicated, lets iDev partially in
+20110420* moved AT command generation to program on drone
+20110419a throttle center not required on boot any more, just fmode LAND
+20110419a at2so_exec() backpack is zipped from now on
+20110418a main() fixed bug, was waiting on rx_read() & ~BV(S_AUX1), should be S_SIG
+20110412* changed to different distribution setup
+20110412 REV 0.04 started
+
+20110412 REV 0.03 done
+20110412 with a 3 position flight mode switch there are 3 flight modes
+20110412 throttle stick is pushbutton when flight mode switch is on LAND
+20110412 uses 5 channels from now on, flight mode switch is S_GEAR or S_AUX1
+20110410 added version string
+20110410 dropped vertical counter in favour of sampling timer1 on RX signal
+         change. This gets rid of the CPU hog problem by vcnt.
+         + decouples drone deadline time from receiver frame time
+         + less complicated to setup
+         - timer1 resolution is 4 microseconds (200 points on full stick)
+
+20110401 REV 0.03 started
+20110331 REV 0.02 done
+
+
+NOTES
+=====
+
+NOTES AT2SO
+  'rx2at' needs a companion program on the drone to relay it's commands to the
+  right spot (aka commandport 5556) on the drone. The companion program is
+  'at2so'. It can be installed on the drone in '/data/video', the default
+  ftp root directory of the drone, or you can use 'rx2atp'. 'rx2atp' is the
+  same as 'rx2at' with 'at2so' attached to it's backend. 'rx2at' recognizes
+  a 'backpack' on start and instead of launching the preinstalled companion,
+  uploads the 'backpack' to the drone's '/tmp' directory and launches it in
+  place. This makes this mod a true PNP!
+
+NOTES TIMER1
+  Free running no interrupts, runs on F_CPU with prescaler.
+  This timer is primarily used to measure the timing properties of the
+  receiver signals. For meaningful measurements it should cover a period
+  of at least 2 frametimes of the receiver without rolling over.
+  200 ms works for most setups.
+
+  F_CPU Mhz prsc   period   roll after
+
+   8.0000      1  125.0ns   0.0081920s too short
+   8.0000      8    1.0us   0.0655360s too short
+   8.0000     64    8.0us   0.5242880s ok
+
+  14.7456      1   67.8ns   0.00444444 too short
+  14.7456      8    0.5us   0.03555556 too short
+  14.7456     64    4.3us   0.28444444 ok
+
+  16.0000      1   62.5ns   0.0040960s too short
+  16.0000      8    0.5us   0.0327680s too short
+  16.0000     64    4.0us   0.2621440s ok
+
+  18.4320      1   54.3ns   0.00355556 too short
+  18.4320      8    0.4us   0.02844444 too short
+  18.4320     64    3.5us   0.22755556 ok
+
+  20.0000      1   50.0ns   0.0032768s too short
+  20.0000      8    0.4us   0.0262144s too short
+  20.0000     64    3.2us   0.2097152s ok
+
+  Prior to rev 0.5 TCNT1 was used directly, resulting in 'poor' resolution
+  (+-100 points) of the receiver sampling capability. Rev 0.05 added tic()
+  and a timer1 overflow interrupt routine. TIMER1 runs on /8 prescaler now
+  and has a resolution of 0.5 microseconds on a 16Mhz Arduino.
+                       /1               /8              /64
+  clock          16000000          2000000           250000
+  period           62.5ns            0.5us            4.0us
+  roll16          4.096ms         32.768ms        262.144ms
+  roll24       1048.576ms       8388.608ms      67.108864s
+  roll32      268.435456s     2147.483648s    17179.86918s
+         00:04:28.435456  00:35:47.483648  04:46:19.86918
+
+  tic() returns a u32_t value, it rolls every 35+ minutes...
+  The sampling resolution went up to +-800 points!
+
+NOTES USART
+  USART is connected to drone /dev/ttyPA0
+  HW protocol is 3 wire, ASYNC, 115200 bps, 8 bit, no parity, 1 stop, no handshake
+
+  The drone is somewhat picky about the error rate...
+
+   8.0000 Mhz Atmega328p at 115200 baud error  8.5% -> does not work with drone
+  14.7456 Mhz Atmega328p at 115200 baud error    0% -> perfect!
+  16.0000 Mhz Atmega328p at 115200 baud error -3.5% -> does not work with drone
+                    but double speed TX error  2.1% -> TX works, single byte RX ok
+  18.4320 Mhz Atmega328p at 115200 baud error    0% -> perfect!
+  20.0000 Mhz Atmega328p at 115200 baud error -1.4% -> TX and RX ok!
+
+  Unless one can change the crystal one is usually stuck with the 16 Mhz
+  version. Unfortunately at 16 Mhz, one has to use the double speed
+  transmitter feature, which challenges the receiver somewhat...
+
+NOTES C_STRT
+  I can't figure out how to make Arduino IDE 'Serial Monitor' send a single
+  control (character other than '\r' and/or '\n') by itself...
+  Use Hyperterminal or something else that can send a single control character.
+  C_STRT must be something most unlikely to show up in the drone boot messages.
+
+NOTES GPSIFC
+  Rev 0.04+ uses Arduino PORTC.0 as RXi and Arduino PORTC.1 as TXo for an
+  optional GPS receiver. The 'soft' serial interface uses timer 0 for timing.
+  Tested baud rates go from 2400 to 57600.
+
+  'rx2atp' SETUP function is aware of the GPS interface and will show data
+  coming in. You can also send data to the GPS (just type), it will do the
+  framing and checksum addition once you hit 'Return'.
+
+NOTES NAVDATA
+  general:navdata_demo,TRUE/FALSE needed to boot navdata...
+  general:navdata_options,# (can be hex) navdata tags request
+  can't turn off TAG 16 (120 bytes) NAVDATA_VISION_DETECT_TAG, made at2so dump it
+
