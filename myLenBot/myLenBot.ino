@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "Wire.h"
 #include "SPI.h"
 #include "Kalman.h"
+#include "sonarCaptureT1.h"
 // I2Cdev and MPU6050 must be installed as libraries, or else the .cpp/.h files
 // for both classes must be in the include path of your project
 #include "I2Cdev.h"
@@ -64,6 +65,7 @@ double gyroX=0.0, gyroY=0.0;
 char sendcnt = 0;
 double kalAngleX=0.0, kalAngleY=0.0; // Calculated angle using a Kalman filter
 volatile int motorSpeed = 0; 
+//for ultrasonic sensor
 uint32_t timer=0;
 
 #define LED_PIN 13
@@ -83,18 +85,19 @@ void setup() {
     // initialize serial communication
     // (38400 chosen because it works as well at 8MHz as it does at 16MHz, but
     // it's really up to you depending on your project)
-    Serial.begin(115200);
-	while(!Serial){
-		;
-	}
+    Serial1.begin(115200);
+	//while(!Serial){
+	//	;
+	//}
+    initSonarCaptureT1();
     // initialize device
-    Serial.println("Initializing I2C devices...");
+    //Serial1.println("Initializing I2C devices...");
     accelgyro.initialize();
 
     // verify connection
-    Serial.println("Testing device connections...");
+    //Serial1.println("Testing device connections...");
     testresult = accelgyro.testConnection();
-    Serial.println(testresult ? "MPU6050 connection successful" : "MPU6050 connection failed");
+    //Serial1.println(testresult ? "MPU6050 connection successful" : "MPU6050 connection failed");
 
     // configure Arduino LED for
     pinMode(LED_PIN, OUTPUT);
@@ -145,25 +148,27 @@ void loop() {
     // these methods (and a few others) are also available
     //accelgyro.getAcceleration(&ax, &ay, &az);
     //accelgyro.getRotation(&gx, &gy, &gz);
+    
 if(testresult){
+    motorSpeed = constrain((int)(kalAngleX*30), -2000, 2000);
     // display tab-separated accel/gyro x/y/z values
 	if(sendcnt<10){
 		sendcnt++;
 	}else{
 		sendcnt=0;
-                motorSpeed = constrain((int)(kalAngleX*30), -2000, 2000);
-		Serial.print(kalAngleX);
-		Serial.print(F(":"));
-		Serial.print(kalAngleY);
-		Serial.print(F("#"));
-		Serial.print(motorSpeed);
-		Serial.println(F("*"));
-		/*Serial.print(gyroYrate);
-		Serial.print(F(":"));
-		Serial.print(pitch);
-		Serial.print(F(":"));
-		Serial.print(dt);
-		Serial.print(F("\r\n"));*/
+                trigPin();
+		Serial1.print(kalAngleX);
+		Serial1.print(F(":"));
+		Serial1.print(kalAngleY);
+		Serial1.print(F("#"));
+		Serial1.print(motorSpeed);
+		Serial1.println(F("*"));
+		/*Serial1.print(gyroYrate);
+		Serial1.print(F(":"));
+		Serial1.print(pitch);
+		Serial1.print(F(":"));
+		Serial1.print(dt);
+		Serial1.print(F("\r\n"));*/
 
 	}
 	delay(1);
@@ -171,7 +176,7 @@ if(testresult){
     blinkState = !blinkState;
     digitalWrite(LED_PIN, blinkState);
 }else{
-  Serial.println("test fail");
+  Serial1.println("test fail");
   delay(500);
 }
 }
