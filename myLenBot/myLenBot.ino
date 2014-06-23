@@ -83,7 +83,7 @@ void setup() {
    stepper.setSpeed(500);	
    stepper2.setMaxSpeed(2000);
    stepper2.setSpeed(1000);
-   Timer3.initialize(100);
+   Timer3.initialize(100);//100us,10kHz
    Timer3.attachInterrupt(rampSpeed);
 }
 void rampSpeed(void){
